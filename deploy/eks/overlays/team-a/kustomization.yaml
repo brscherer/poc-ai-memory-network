@@ -1,0 +1,49 @@
+# Example tenant "team-a".
+# Copy this directory per trust boundary and adjust names/hosts.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ai-memory-team-a
+resources:
+  - ../../base
+  - namespace.yaml
+labels:
+  - pairs:
+      ai-platform/tenant: team-a
+    includeSelectors: false
+images:
+  - name: REGISTRY/ai-memory
+    newName: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/mirror/ai-memory
+    digest: sha256:REPLACE_WITH_SCANNED_DIGEST
+patches:
+  - target: { kind: Ingress, name: ai-memory }
+    patch: |
+      - op: replace
+        path: /spec/rules/0/host
+        value: memory-team-a.example.com
+      - op: replace
+        path: /metadata/annotations/alb.ingress.kubernetes.io~1certificate-arn
+        value: arn:aws:acm:us-east-1:ACCOUNT_ID:certificate/REPLACE
+  - target: { kind: StatefulSet, name: ai-memory }
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/env/1/value
+        value: memory-team-a.example.com,localhost,127.0.0.1
+      - op: replace
+        path: /spec/template/spec/containers/2/args/0
+        value: |
+          while true; do
+            aws s3 sync /backups "s3://example-ai-memory-backups/team-a/" --sse aws:kms \
+              && find /backups -name '*.tar.gz' -mmin +60 -delete
+            sleep 3600
+          done
+  - target: { kind: ExternalSecret, name: ai-memory }
+    patch: |
+      - op: replace
+        path: /spec/data/0/remoteRef/key
+        value: ai-memory/team-a/root-token
+      - op: replace
+        path: /spec/data/1/remoteRef/key
+        value: ai-memory/team-a/token-pepper
+      - op: replace
+        path: /spec/data/2/remoteRef/key
+        value: ai-memory/team-a/litellm-key

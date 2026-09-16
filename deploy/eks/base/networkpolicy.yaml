@@ -1,0 +1,37 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ai-memory
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ai-memory
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # ALB targets pods by IP from inside the VPC; agent pods in-cluster
+    # reach the Service directly.
+    - from:
+        - ipBlock: { cidr: VPC_CIDR }
+        - namespaceSelector:
+            matchLabels: { ai-platform/memory-client: "true" }
+      ports:
+        - { port: 49374, protocol: TCP }
+  egress:
+    # Only LiteLLM for LLM calls. No direct internet / provider access.
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: ai-gateway }
+      ports:
+        - { port: 4000, protocol: TCP }
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    # S3 (backup-ship) via the VPC interface endpoint's subnet range.
+    - to:
+        - ipBlock: { cidr: S3_ENDPOINT_CIDR }
+      ports:
+        - { port: 443, protocol: TCP }

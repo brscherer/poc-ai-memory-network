@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ai-memory
+spec:
+  # MUST stay 1: one server per data directory (single SQLite writer).
+  replicas: 1
+  serviceName: ai-memory
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ai-memory
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ai-memory
+    spec:
+      serviceAccountName: ai-memory
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: ai-memory
+          # Pin by digest from the internal registry mirror after scanning.
+          image: REGISTRY/ai-memory@sha256:PINNED_DIGEST
+          args: ["serve", "--transport", "http", "--bind", "0.0.0.0:49374", "--enable-web"]
+          ports:
+            - { name: http, containerPort: 49374 }
+          env:
+            - { name: AI_MEMORY_DATA_DIR, value: /data }
+            - { name: AI_MEMORY_ALLOWED_HOSTS, value: "MEMORY_HOSTNAME,localhost,127.0.0.1" }
+            - { name: AI_MEMORY_AUTH__ROOT_USERNAME, value: memory-admin }
+            - name: AI_MEMORY_AUTH_TOKEN
+              valueFrom: { secretKeyRef: { name: ai-memory, key: root-token } }
+            - name: AI_MEMORY_AUTH__TOKEN_PEPPER
+              valueFrom: { secretKeyRef: { name: ai-memory, key: token-pepper } }
+            # Consolidation LLM: the shared LiteLLM gateway only (OpenAI-format route).
+            - { name: AI_MEMORY_LLM_PROVIDER, value: openai-compat }
+            - { name: AI_MEMORY_LLM_BASE_URL, value: "http://litellm.ai-gateway.svc.cluster.local:4000/v1" }
+            - { name: AI_MEMORY_LLM_MODEL, value: memory-consolidation }
+            - { name: AI_MEMORY_LLM_HEADERS, value: "x-litellm-tags=ai-memory" }
+            - name: LLM_API_KEY
+              valueFrom: { secretKeyRef: { name: ai-memory, key: litellm-key } }
+            # Shared-server abuse guard for hook traffic.
+            - { name: AI_MEMORY_HOOK_RATE_PER_SEC, value: "50" }
+            - { name: AI_MEMORY_HOOK_RATE_BURST, value: "200" }
+          resources:
+            requests: { cpu: 500m, memory: 512Mi }
+            limits: { memory: 2Gi }
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+
+        # Online snapshot (SQLite backup API) every 6h into a shared dir.
+        - name: backup
+          image: REGISTRY/ai-memory@sha256:PINNED_DIGEST
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              while true; do
+                ai-memory --data-dir /data backup --to /backups/ai-memory-$(date +%Y%m%dT%H%M).tar.gz \
+                  || echo "backup failed"
+                sleep 21600
+              done
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: backups, mountPath: /backups }
+            - { name: tmp, mountPath: /tmp }
+
+        # Ship snapshots to S3 (versioned, SSE-KMS, lifecycle-expired).
+        - name: backup-ship
+          image: public.ecr.aws/aws-cli/aws-cli:2.17.0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              while true; do
+                aws s3 sync /backups "s3://BACKUP_BUCKET/ai-memory/TENANT/" --sse aws:kms \
+                  && find /backups -name '*.tar.gz' -mmin +60 -delete
+                sleep 3600
+              done
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: backups, mountPath: /backups }
+      volumes:
+        - { name: tmp, emptyDir: {} }
+        - { name: backups, emptyDir: { sizeLimit: 20Gi } }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        # Block storage (EBS gp3). Do NOT use EFS/NFS: fsync latency
+        # dominates write throughput and network filesystems cut it sharply.
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: gp3-encrypted
+        resources:
+          requests:
+            storage: 50Gi

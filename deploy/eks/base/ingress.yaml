@@ -1,0 +1,29 @@
+# Internal ALB only (reachable from the private network / VPN / peered VPCs).
+# TLS terminates at the ALB with an ACM certificate.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ai-memory
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: ACM_CERT_ARN
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+    alb.ingress.kubernetes.io/healthcheck-port: traffic-port
+    alb.ingress.kubernetes.io/success-codes: "200-499"
+    alb.ingress.kubernetes.io/group.name: ai-platform-internal
+    # Long-lived MCP streams.
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=900
+spec:
+  ingressClassName: alb
+  rules:
+    - host: MEMORY_HOSTNAME
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ai-memory
+                port: { name: http }
