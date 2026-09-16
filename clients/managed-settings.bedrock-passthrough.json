@@ -1,0 +1,13 @@
+{
+  "apiKeyHelper": "/usr/local/bin/claude-gateway-key",
+  "env": {
+    "CLAUDE_CODE_USE_BEDROCK": "1",
+    "CLAUDE_CODE_SKIP_BEDROCK_AUTH": "1",
+    "ANTHROPIC_BEDROCK_BASE_URL": "https://llm-gateway.example.com/bedrock",
+    "AWS_REGION": "us-east-1",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "REPLACE_WITH_OPUS_INFERENCE_PROFILE_ID",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "REPLACE_WITH_SONNET_INFERENCE_PROFILE_ID",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "REPLACE_WITH_HAIKU_INFERENCE_PROFILE_ID",
+    "AI_MEMORY_SERVER_URL": "https://memory-team-a.example.com"
+  }
+}

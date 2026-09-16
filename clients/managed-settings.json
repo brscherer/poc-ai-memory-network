@@ -1,0 +1,11 @@
+{
+  "apiKeyHelper": "/usr/local/bin/claude-gateway-key",
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://llm-gateway.example.com",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5",
+    "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "3600000",
+    "AI_MEMORY_SERVER_URL": "https://memory-team-a.example.com"
+  }
+}
