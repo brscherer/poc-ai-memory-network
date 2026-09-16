@@ -1,0 +1,14 @@
+# Memory scope marker for this repository.
+# Every agent session whose cwd is inside this tree files memory under
+# workspace/project below. Static MCP clients must pass these same two
+# values on every project-scoped tool call.
+workspace = "poc"
+project = "poc-ai-memory-network"
+
+[briefing]
+# Inject pinned pages, _rules/ and recent titles at session start.
+inject_on_session_start = "true"
+
+[capture]
+# Never capture reads/edits of local secrets or env files.
+ignore_paths = ["local/.env", "**/*.pem", "**/secrets/**"]

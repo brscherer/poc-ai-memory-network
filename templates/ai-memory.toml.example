@@ -1,0 +1,37 @@
+# Copy to the ROOT of each repository as `.ai-memory.toml` and commit it.
+#
+# With `ai-memory install-hooks --capture-mode allowlist` (recommended),
+# a repository WITHOUT this file emits no lifecycle events at all, so
+# committing it is the explicit opt-in to shared memory.
+
+# Required. One workspace per domain / group of related repos.
+workspace = "<domain>"            # e.g. "billing", "data-platform"
+
+# Recommended. Pin the project name to the repo's canonical name so two
+# checkouts named differently (or two repos both named "api") never mix.
+project = "<repo-name>"           # e.g. "billing-api"
+
+# Alternative to `project`: derive from the git root (worktrees and
+# subdirectories collapse into one project). Ignored when `project` is set.
+# project_strategy = "repo-root"
+
+# Recommended for large repos: inject the compiled project brief
+# (pinned pages, _rules/, recent page titles) at session start.
+[briefing]
+inject_on_session_start = "true"
+
+# Monorepo meta-repos only: make unscoped queries search every project.
+# [recall]
+# default_global = "true"
+
+# Paths whose file-tool activity must never be captured. Matching events
+# are dropped on the client before they reach the network.
+[capture]
+ignore_paths = [
+  "**/.env",
+  "**/.env.*",
+  "**/*.pem",
+  "**/*.key",
+  "**/secrets/**",
+  "**/terraform.tfstate*",
+]
