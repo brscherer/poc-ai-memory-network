@@ -1,0 +1,84 @@
+# Local replica of the multi-team topology:
+#
+#   Claude Code ──(Anthropic format)──► LiteLLM ──► Amazon Bedrock
+#   Claude Code ──(hooks + MCP)──────► ai-memory ──(OpenAI format)──► LiteLLM ──► Bedrock
+#
+# ai-memory listens on 49375 so it does not collide with an existing
+# personal ai-memory container on 49374.
+#
+#   cp .env.example .env && $EDITOR .env
+#   ./render-litellm-config.sh
+#   docker compose up -d
+#   ../scripts/bootstrap-keys.sh     # issues LiteLLM + ai-memory keys
+#   ../scripts/verify.sh             # end-to-end checks
+
+name: ai-memory-gateway-poc
+
+services:
+  litellm-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:?set in .env}
+    volumes:
+      - litellm-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 10s
+      retries: 5
+
+  litellm:
+    image: ghcr.io/berriai/litellm:${LITELLM_TAG:-main-stable}
+    restart: unless-stopped
+    depends_on:
+      litellm-db:
+        condition: service_healthy
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    ports:
+      - "127.0.0.1:4000:4000"
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set in .env}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?set in .env}
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD}@litellm-db:5432/litellm
+      STORE_MODEL_IN_DB: "False"
+      # Bedrock credentials. Locally we reuse an AWS profile; in EKS use
+      # EKS Pod Identity / IRSA instead of any static credential.
+      AWS_PROFILE: ${AWS_PROFILE:-default}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+    volumes:
+      - ./litellm-config.rendered.yaml:/app/config.yaml:ro
+      - ${HOME}/.aws:/root/.aws:ro
+
+  ai-memory:
+    image: docker.io/akitaonrails/ai-memory:${AI_MEMORY_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      - litellm
+    ports:
+      - "127.0.0.1:49375:49374"
+    volumes:
+      - ai-memory-data:/data
+    environment:
+      # --- Server auth (root bearer + pepper for per-user aim_ keys) ---
+      AI_MEMORY_AUTH_TOKEN: ${AI_MEMORY_ROOT_TOKEN:?set in .env}
+      AI_MEMORY_AUTH__TOKEN_PEPPER: ${AI_MEMORY_TOKEN_PEPPER:?set in .env}
+      AI_MEMORY_AUTH__ROOT_USERNAME: memory-admin
+      AI_MEMORY_ALLOWED_HOSTS: localhost,127.0.0.1,::1,host.docker.internal,ai-memory
+      # --- LLM for consolidation: routed through LiteLLM, never direct ---
+      AI_MEMORY_LLM_PROVIDER: openai-compat
+      AI_MEMORY_LLM_BASE_URL: http://litellm:4000/v1
+      AI_MEMORY_LLM_MODEL: memory-consolidation
+      LLM_API_KEY: ${AI_MEMORY_LITELLM_KEY:-pending-bootstrap}
+      AI_MEMORY_LLM_HEADERS: x-litellm-tags=ai-memory
+      # --- Optional semantic search: embeddings also via LiteLLM ---
+      # AI_MEMORY_EMBEDDING_PROVIDER: openai-compat
+      # AI_MEMORY_EMBEDDING_BASE_URL: http://litellm:4000/v1
+      # AI_MEMORY_EMBEDDING_MODEL: memory-embeddings
+      # AI_MEMORY_EMBEDDING_DIM: "1024"
+      # EMBEDDING_API_KEY: ${AI_MEMORY_LITELLM_KEY}
+
+volumes:
+  litellm-db:
+  ai-memory-data:

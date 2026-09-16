@@ -1,0 +1,45 @@
+# LiteLLM proxy config: every model is Claude on Amazon Bedrock.
+# Rendered to litellm-config.rendered.yaml by ./render-litellm-config.sh.
+#
+# model_name values are the aliases clients ask for:
+#   - claude-opus-5 / claude-sonnet-5 / claude-haiku-4-5 : Claude Code
+#     (Anthropic-format endpoint /v1/messages)
+#   - memory-consolidation : ai-memory server (OpenAI-format endpoint)
+#   - memory-embeddings    : ai-memory semantic search (optional)
+
+model_list:
+  - model_name: claude-opus-5
+    litellm_params:
+      model: bedrock/${BEDROCK_OPUS_ID}
+      aws_region_name: os.environ/AWS_REGION
+
+  - model_name: claude-sonnet-5
+    litellm_params:
+      model: bedrock/${BEDROCK_SONNET_ID}
+      aws_region_name: os.environ/AWS_REGION
+
+  - model_name: claude-haiku-4-5
+    litellm_params:
+      model: bedrock/${BEDROCK_HAIKU_ID}
+      aws_region_name: os.environ/AWS_REGION
+
+  # ai-memory consolidation: session transcripts -> wiki pages.
+  # Haiku-class is enough for summarisation and keeps cost predictable.
+  - model_name: memory-consolidation
+    litellm_params:
+      model: bedrock/${BEDROCK_HAIKU_ID}
+      aws_region_name: os.environ/AWS_REGION
+
+  - model_name: memory-embeddings
+    litellm_params:
+      model: bedrock/${BEDROCK_EMBED_ID}
+      aws_region_name: os.environ/AWS_REGION
+
+litellm_settings:
+  drop_params: true
+  # Policy guardrails (PII masking, prompt-injection checks, etc.) go
+  # here; they apply to Claude Code AND ai-memory traffic.
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
