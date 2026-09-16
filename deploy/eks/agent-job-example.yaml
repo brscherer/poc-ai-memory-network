@@ -1,0 +1,56 @@
+# Headless Claude Code agent running inside EKS (e.g. nightly dependency
+# upgrades, flaky-test triage). It reads/writes the SAME project memory the
+# developers use, and all inference goes through LiteLLM.
+#
+# Requires an internal runner image with: git, claude, ai-memory CLI.
+# The namespace must carry label ai-platform/memory-client=true so the
+# ai-memory NetworkPolicy admits it.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: agent-service-a-triage
+  namespace: agents-team-a
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: agent-runner          # Pod Identity -> read its own secrets only
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000 }
+      initContainers:
+        - name: checkout
+          image: REGISTRY/agent-runner@sha256:PINNED_DIGEST
+          command: ["git", "clone", "--depth=50", "https://git.example.com/team-a/service-a.git", "/work/repo"]
+          volumeMounts: [{ name: work, mountPath: /work }]
+      containers:
+        - name: agent
+          image: REGISTRY/agent-runner@sha256:PINNED_DIGEST
+          workingDir: /work/repo                 # repo contains a committed .ai-memory.toml
+          env:
+            - { name: HOME, value: /work/home }
+            # --- inference: LiteLLM, Anthropic format ---
+            - { name: ANTHROPIC_BASE_URL, value: "http://litellm.ai-gateway.svc.cluster.local:4000" }
+            - name: ANTHROPIC_AUTH_TOKEN
+              valueFrom: { secretKeyRef: { name: agent-team-a, key: litellm-key } }
+            - { name: ANTHROPIC_DEFAULT_SONNET_MODEL, value: claude-sonnet-5 }
+            # --- memory: tenant ai-memory, in-cluster service ---
+            - { name: AI_MEMORY_SERVER_URL, value: "http://ai-memory.ai-memory-team-a.svc.cluster.local:49374" }
+            - name: AI_MEMORY_AUTH_TOKEN
+              valueFrom: { secretKeyRef: { name: agent-team-a, key: ai-memory-key } }
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              ai-memory install-hooks --agent claude-code --apply \
+                --server-url "$AI_MEMORY_SERVER_URL" --auth-token "$AI_MEMORY_AUTH_TOKEN" \
+                --as-user svc-agent-team-a --capture-mode allowlist --project-strategy repo-root
+              ai-memory install-mcp --client claude-code --session-aware --apply \
+                --server-url "$AI_MEMORY_SERVER_URL" --auth-token "$AI_MEMORY_AUTH_TOKEN"
+              claude -p "Check project memory for known flaky tests, then triage the latest CI failures and write findings back to memory as notes/ci-triage.md." \
+                --permission-mode acceptEdits --allowedTools "Read,Grep,Glob,Bash(git log:*),Bash(make test:*),mcp__ai-memory__*"
+          resources:
+            requests: { cpu: "1", memory: 2Gi }
+          volumeMounts: [{ name: work, mountPath: /work }]
+      volumes:
+        - { name: work, emptyDir: {} }
