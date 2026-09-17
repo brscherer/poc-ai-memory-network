@@ -47,3 +47,6 @@ patches:
       - op: replace
         path: /spec/data/2/remoteRef/key
         value: ai-memory/team-a/litellm-key
+      - op: replace
+        path: /spec/data/3/remoteRef/key
+        value: ai-memory/team-a/recovery-token

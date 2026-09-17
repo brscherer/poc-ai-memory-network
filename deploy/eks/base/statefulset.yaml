@@ -37,11 +37,21 @@ spec:
               valueFrom: { secretKeyRef: { name: ai-memory, key: root-token } }
             - name: AI_MEMORY_AUTH__TOKEN_PEPPER
               valueFrom: { secretKeyRef: { name: ai-memory, key: token-pepper } }
+            - name: AI_MEMORY_AUTH__RECOVERY_TOKEN
+              valueFrom: { secretKeyRef: { name: ai-memory, key: recovery-token } }
+            # TLS terminates at the ALB. Required once human users exist on a
+            # non-loopback bind, otherwise the server refuses to start.
+            - { name: AI_MEMORY_AUTH__SECURE_COOKIE, value: "true" }
+            # Unset, the server downloads a local embedding model from
+            # huggingface.co at startup. Keep it off until embeddings are
+            # routed through LiteLLM (AI_MEMORY_EMBEDDING_PROVIDER=openai-compat).
+            - { name: AI_MEMORY_EMBEDDING_PROVIDER, value: none }
             # Consolidation LLM: the shared LiteLLM gateway only (OpenAI-format route).
             - { name: AI_MEMORY_LLM_PROVIDER, value: openai-compat }
             - { name: AI_MEMORY_LLM_BASE_URL, value: "http://litellm.ai-gateway.svc.cluster.local:4000/v1" }
             - { name: AI_MEMORY_LLM_MODEL, value: memory-consolidation }
-            - { name: AI_MEMORY_LLM_HEADERS, value: "x-litellm-tags=ai-memory" }
+            # Must be a list: the env loader rejects the plain "a=b,c=d" form.
+            - { name: AI_MEMORY_LLM_HEADERS, value: '["x-litellm-tags: ai-memory"]' }
             - name: LLM_API_KEY
               valueFrom: { secretKeyRef: { name: ai-memory, key: litellm-key } }
             # Shared-server abuse guard for hook traffic.
@@ -65,14 +75,20 @@ spec:
             - { name: data, mountPath: /data }
             - { name: tmp, mountPath: /tmp }
 
-        # Online snapshot (SQLite backup API) every 6h into a shared dir.
+        # Snapshot every 6h. `ai-memory backup` asks the running server
+        # (POST /admin/backup, root-only) for a consistent tarball and writes
+        # it into the shared dir, so it needs the root token.
         - name: backup
           image: REGISTRY/ai-memory@sha256:PINNED_DIGEST
+          env:
+            - name: AI_MEMORY_AUTH_TOKEN
+              valueFrom: { secretKeyRef: { name: ai-memory, key: root-token } }
           command: ["/bin/sh", "-c"]
           args:
             - |
+              until ai-memory status >/dev/null 2>&1; do sleep 5; done
               while true; do
-                ai-memory --data-dir /data backup --to /backups/ai-memory-$(date +%Y%m%dT%H%M).tar.gz \
+                ai-memory backup --to /backups/ai-memory-$(date +%Y%m%dT%H%M).tar.gz \
                   || echo "backup failed"
                 sleep 21600
               done

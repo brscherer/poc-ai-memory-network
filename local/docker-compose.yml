@@ -65,14 +65,21 @@ services:
       AI_MEMORY_AUTH_TOKEN: ${AI_MEMORY_ROOT_TOKEN:?set in .env}
       AI_MEMORY_AUTH__TOKEN_PEPPER: ${AI_MEMORY_TOKEN_PEPPER:?set in .env}
       AI_MEMORY_AUTH__ROOT_USERNAME: memory-admin
+      # Needed once human users exist, or the server will not restart.
+      AI_MEMORY_AUTH__RECOVERY_TOKEN: ${AI_MEMORY_RECOVERY_TOKEN:?set in .env}
+      # The container binds 0.0.0.0, so human auth requires Secure cookies
+      # (web login then needs HTTPS in front; API keys work either way).
+      AI_MEMORY_AUTH__SECURE_COOKIE: "true"
       AI_MEMORY_ALLOWED_HOSTS: localhost,127.0.0.1,::1,host.docker.internal,ai-memory
       # --- LLM for consolidation: routed through LiteLLM, never direct ---
       AI_MEMORY_LLM_PROVIDER: openai-compat
       AI_MEMORY_LLM_BASE_URL: http://litellm:4000/v1
       AI_MEMORY_LLM_MODEL: memory-consolidation
       LLM_API_KEY: ${AI_MEMORY_LITELLM_KEY:-pending-bootstrap}
-      AI_MEMORY_LLM_HEADERS: x-litellm-tags=ai-memory
-      # --- Optional semantic search: embeddings also via LiteLLM ---
+      AI_MEMORY_LLM_HEADERS: '["x-litellm-tags: ai-memory"]'
+      # --- Semantic search: off by default (otherwise a model is downloaded
+      #     from huggingface.co at startup). To enable, route via LiteLLM: ---
+      AI_MEMORY_EMBEDDING_PROVIDER: none
       # AI_MEMORY_EMBEDDING_PROVIDER: openai-compat
       # AI_MEMORY_EMBEDDING_BASE_URL: http://litellm:4000/v1
       # AI_MEMORY_EMBEDDING_MODEL: memory-embeddings
