@@ -22,7 +22,7 @@ Design, security controls, tenancy and rollout: [docs/architecture.md](docs/arch
 | `deploy/eks/` | Kustomize base + per-tenant overlay (StatefulSet, internal ALB, NetworkPolicy, External Secrets, S3 backups) |
 | `deploy/eks/agent-job-example.yaml` | Headless Claude Code job in EKS using gateway + shared memory |
 | `deploy/ec2/user-data.sh` | EC2 dev/agent host bootstrap |
-| `aws-local/` | The same architecture on emulated AWS (floci): EKS, EC2, ECR, Secrets Manager, S3, Bedrock. Produces an evidence report |
+| `aws-local/` | The same architecture on emulated AWS (floci), with the AWS layer in OpenTofu: EKS, EC2, ECR, Secrets Manager, S3, Bedrock. Produces an evidence report |
 | `scripts/mcp-call.sh` | Call one ai-memory MCP tool (what users and agents use; CLI page commands are root-only) |
 
 ## Local quickstart
@@ -69,7 +69,8 @@ Then in Claude Code, `/status` should show the gateway base URL and the
 - The architecture has been run end to end on **emulated AWS** (`aws-local/`,
   powered by [floci](https://github.com/floci-io/floci)): a real k3s cluster,
   real EC2 guests with IMDS, ECR, Secrets Manager, S3 and External Secrets.
-  The latest run passes 32/32 checks — see `aws-local/evidence/`.
+  The latest run passes 32/32 checks — see `aws-local/evidence/`. The AWS
+  resources there are OpenTofu, so the same stacks describe real AWS.
   What the manifests in `deploy/eks/base` apply there is what they apply in EKS.
 - Not yet run against a real AWS account: Bedrock answers are emulated (stubbed
   or proxied), and the ALB and Pod Identity have local stand-ins.

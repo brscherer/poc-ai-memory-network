@@ -167,6 +167,7 @@ applied to the manifests here.
 | `ai-memory backup` asks the running server (`POST /admin/backup`, root-only) and writes the tarball itself | The backup sidecar needs the root token and its own mount; it also has to wait for the server to be listening. |
 | `install-hooks --as-user` is rejected whenever the token is persisted to disk (upstream bug in 2.2.1) | Attribution comes from the API key's owner; `--as-user` is only a label, so it is not used. |
 | LiteLLM key **tags** are an Enterprise feature | Attribute memory spend with a dedicated service key and alias instead. |
+| A Service selecting only `app.kubernetes.io/name` also matched a debug pod that had to carry that label for the NetworkPolicy | The Service now requires `app.kubernetes.io/component=server`; keep workload selectors narrower than policy selectors. |
 | A StatefulSet will not replace a crash-looping pod on its own | Roll out config changes with a pod delete, or tenants get stuck on a bad revision. |
 
 Emulation-only caveats (not production risks) are listed in
