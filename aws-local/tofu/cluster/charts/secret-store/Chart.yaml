@@ -1,0 +1,8 @@
+apiVersion: v2
+name: secret-store
+description: >-
+  The ClusterSecretStore the production manifests reference. Shipped as a
+  chart because kubernetes_manifest needs a CRD to exist at plan time, and
+  External Secrets installs that CRD in the same apply.
+type: application
+version: 0.1.0

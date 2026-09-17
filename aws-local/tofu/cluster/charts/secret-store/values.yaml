@@ -1,0 +1,5 @@
+name: aws-secrets-manager
+region: us-east-1
+credentialsSecret:
+  name: aws-credentials
+  namespace: external-secrets
