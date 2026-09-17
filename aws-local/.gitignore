@@ -1,4 +1,4 @@
 .state/
 tofu/*/terraform.tfstate*
 tofu/*/.terraform/
-.state-up.log
+.state-*.log
