@@ -25,7 +25,12 @@ CANARY="CANARY-$(date +%s)"
 pass=0; fail=0
 ok()  { echo "  PASS  $*"; pass=$((pass+1)); }
 bad() { echo "  FAIL  $*"; fail=$((fail+1)); }
-mem() { docker compose exec -T -e AI_MEMORY_AUTH_TOKEN="$MEMORY_KEY" ai-memory ai-memory "$@"; }
+# Developer operations go through MCP, like an agent: the CLI page commands
+# use root-only /admin routes once users exist.
+MCP="$(dirname "$0")/mcp-call.sh"
+export AI_MEMORY_SERVER_URL="$MEMORY" AI_MEMORY_AUTH_TOKEN="$MEMORY_KEY"
+w() { "$MCP" memory_write_page "$(jq -nc --arg ws "$WS" --arg p "$1" --arg path "$2" --arg b "$3" '{workspace:$ws,project:$p,path:$path,body:$b}')" >/dev/null; }
+q() { "$MCP" memory_query "$(jq -nc --arg ws "$WS" --arg p "$1" --arg q "$2" '{workspace:$ws,project:$p,query:$q}')" | jq -r '.hits[].path'; }
 
 echo "1. LiteLLM liveness"
 curl -fsS "$LITELLM/health/liveliness" >/dev/null && ok "litellm up" || bad "litellm down"
@@ -42,24 +47,24 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$MEMORY/mcp" -H 'content-
 [ "$code" = 401 ] && ok "anonymous call rejected (401)" || bad "anonymous call got $code (expected 401)"
 
 echo "4. ai-memory -> LiteLLM -> Bedrock"
-docker compose exec -T ai-memory ai-memory llm-test --prompt "Reply with: pong" 2>&1 | grep -qi pong \
+docker compose exec -T ai-memory sh -c 'ai-memory llm-test --provider openai-compat --model "$AI_MEMORY_LLM_MODEL" --prompt "Reply with: pong"' 2>&1 | grep -qi pong \
   && ok "consolidation LLM reachable" || bad "llm-test failed (check AI_MEMORY_LITELLM_KEY)"
 
 echo "5. write + read in $WS/$PA"
-mem write-page --workspace "$WS" --project "$PA" --path notes/verify.md \
-  --body "$(printf '# Verify\n\nToken: %s\n' "$CANARY")" --tag verify >/dev/null \
+w "$PA" notes/verify.md "$(printf '# Verify\n\nToken: %s\n' "$CANARY")" \
   && ok "page written" || bad "write failed"
-mem search "$CANARY" --workspace "$WS" --project "$PA" | grep -q notes/verify.md \
+q "$PA" "$CANARY" | grep -qx notes/verify.md \
   && ok "page found in project A" || bad "page not found in project A"
 
 echo "6. isolation: $WS/$PB"
-mem write-page --workspace "$WS" --project "$PB" --path notes/empty.md --body "# Empty" >/dev/null
-mem search "$CANARY" --workspace "$WS" --project "$PB" | grep -q notes/verify.md \
+w "$PB" notes/empty.md "# Empty"
+q "$PB" "$CANARY" | grep -qx notes/verify.md \
   && bad "LEAK: project B sees project A page" || ok "project B cannot see it"
 
 echo "7. persistence across restart"
-docker compose restart ai-memory >/dev/null; sleep 5
-mem search "$CANARY" --workspace "$WS" --project "$PA" | grep -q notes/verify.md \
+docker compose restart ai-memory >/dev/null
+until curl -s -o /dev/null "$MEMORY/mcp"; do sleep 1; done
+q "$PA" "$CANARY" | grep -qx notes/verify.md \
   && ok "page survived restart" || bad "page lost after restart"
 
 echo
