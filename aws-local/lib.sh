@@ -47,10 +47,19 @@ preload_image() {
 port_forward() {
   kubectl -n "$1" port-forward "svc/$2" "$3:$4" >/dev/null 2>&1 &
   PF_PIDS="${PF_PIDS:-} $!"
+  disown %% 2>/dev/null || true   # no "Terminated" notice when we kill it
   trap 'kill $PF_PIDS 2>/dev/null || true' EXIT
   for _ in $(seq 1 30); do nc -z 127.0.0.1 "$3" 2>/dev/null && return 0; sleep 1; done
   echo "port-forward $2 failed" >&2; return 1
 }
+# wait_http URL : poll until the endpoint answers at all (any HTTP status)
+wait_http() {
+  for _ in $(seq 1 60); do curl -s -o /dev/null -m 3 "$1" && return 0; sleep 2; done
+  echo "timed out waiting for $1" >&2; return 1
+}
+
 secret_value() { aws secretsmanager get-secret-value --secret-id "$1" --query SecretString --output text; }
 has_secret()   { aws secretsmanager describe-secret --secret-id "$1" >/dev/null 2>&1; }
 mem_exec()     { kubectl -n ai-memory-team-a exec -i ai-memory-0 -c ai-memory -- ai-memory "$@"; }
+# tofu_out STACK NAME : read one output from a Tofu stack
+tofu_out() { tofu -chdir="$AWS_LOCAL_DIR/tofu/$1" output -raw "$2"; }

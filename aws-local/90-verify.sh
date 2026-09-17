@@ -69,7 +69,9 @@ check Memory "developer note is attributed to the developer" sh -c "\"$MCP\" mem
 check Memory "developer key cannot call admin routes" sh -c "! kubectl -n ai-memory-team-a exec ai-memory-0 -c ai-memory -- env AI_MEMORY_AUTH_TOKEN='$DEV_MEM' ai-memory search x --workspace poc --project verify-a 2>&1 | grep -q verify.md"
 kubectl -n ai-memory-team-a delete pod ai-memory-0 --wait=true >/dev/null
 kubectl -n ai-memory-team-a wait --for=condition=Ready pod/ai-memory-0 --timeout=180s >/dev/null
-kill $PF_PIDS 2>/dev/null; PF_PIDS=""; port_forward ai-memory-team-a ai-memory 14374 49374
+kill $PF_PIDS 2>/dev/null; PF_PIDS=""
+port_forward ai-memory-team-a ai-memory 14374 49374
+wait_http http://127.0.0.1:14374/mcp   # the tunnel listens before it can reach the new pod
 check Memory "page survives pod replacement (PVC)" sh -c "$(declare -f q); MCP='$MCP'; q verify-a '$CANARY' | grep -x notes/verify.md"
 check Memory "snapshot shipped to S3" sh -c "for i in \$(seq 1 20); do aws s3 ls s3://$BACKUP_BUCKET/team-a/ | grep -q tar.gz && aws s3 ls s3://$BACKUP_BUCKET/team-a/ | tail -1 && exit 0; sleep 6; done; exit 1"
 
@@ -79,10 +81,8 @@ echo "== Network policy"
 # and retry each assertion until the sync catches up.
 MEM_URL=http://ai-memory.ai-memory-team-a.svc.cluster.local:49374/mcp
 LLM_URL=http://litellm.ai-gateway.svc.cluster.local:4000/health/liveliness
-for ns in np-outsider np-agents; do
-  kubectl create namespace $ns --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-done
-kubectl label namespace np-agents ai-platform/memory-client=true --overwrite >/dev/null
+# np-outsider and np-agents (labelled ai-platform/memory-client) come from
+# tofu/cluster.
 mkprobe() { # mkprobe NAMESPACE NAME LABELS
   kubectl -n "$1" get pod "$2" >/dev/null 2>&1 && return 0
   kubectl -n "$1" run "$2" --image=curlimages/curl:8.10.1 --labels="$3" --restart=Never \

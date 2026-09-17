@@ -9,10 +9,12 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: ai-memory
+      app.kubernetes.io/component: server
   template:
     metadata:
       labels:
         app.kubernetes.io/name: ai-memory
+        app.kubernetes.io/component: server
     spec:
       serviceAccountName: ai-memory
       terminationGracePeriodSeconds: 30

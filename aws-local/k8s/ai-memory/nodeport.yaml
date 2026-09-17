@@ -10,5 +10,6 @@ spec:
   externalTrafficPolicy: Local
   selector:
     app.kubernetes.io/name: ai-memory
+    app.kubernetes.io/component: server
   ports:
     - { name: http, port: 49374, targetPort: http, nodePort: 30374 }

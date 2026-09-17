@@ -23,16 +23,16 @@ unchanged to a real Kubernetes cluster, and every hop is tested by
 
 ## Run it
 
-Needs Docker (≈6 GB free memory), `aws`, `kubectl`, `helm`, `jq`.
+Needs Docker (≈6 GB free memory), `tofu`, `aws`, `kubectl`, `helm`, `jq`.
 
 ```bash
-aws-local/up.sh        # 10-iam … 80-ec2, idempotent; first run pulls several GB
+aws-local/up.sh        # tofu stacks + glue scripts, idempotent
 aws-local/90-verify.sh # evidence report -> aws-local/evidence/
-aws-local/down.sh      # removes everything, including floci data
+aws-local/down.sh      # destroys the stacks, then floci and its data
 ```
 
-Individual steps can be re-run on their own (`aws-local/60-memory.sh`, …).
-Credentials and the kubeconfig live in `aws-local/.state/` (git-ignored).
+Credentials, the kubeconfig and Tofu state live in `aws-local/.state/` and
+`aws-local/tofu/*/terraform.tfstate` (both git-ignored).
 
 To poke around:
 
@@ -42,19 +42,31 @@ kubectl get pods -A
 open http://127.0.0.1:4566/_floci/ui          # floci console
 ```
 
-## Steps
+## Infrastructure as code
 
-| Script | Does |
+AWS resources are OpenTofu; the scripts cover only what is not an AWS API
+call. Three stacks, because a provider cannot be configured from a cluster
+that the same apply is still creating:
+
+| Stack | Contains | Applied |
+|---|---|---|
+| `tofu/aws` | IAM (admin user, roles, instance profile), generated secrets, S3 buckets + release objects, ECR repository, VPC/subnets, EKS cluster | first |
+| `tofu/cluster` | In-cluster Service for the AWS endpoint, External Secrets (Helm) wired to floci, `ClusterSecretStore`, the namespaces the policy checks use | after the cluster answers |
+| `tofu/host` | The EC2 developer/agent host and its user-data | last: the guest calls the gateway and ai-memory while booting |
+
+Against real AWS the only differences are the provider `endpoints` block, the
+Pod Identity stand-in, and the AMI/instance type.
+
+| Script | Why it is not Tofu |
 |---|---|
-| `10-iam.sh` | Admin IAM user (EKS auth), cluster role, `ai-host` role + instance profile |
-| `20-eks.sh` | `aws eks create-cluster`, kubeconfig via `aws eks update-kubeconfig` |
-| `30-seed.sh` | Secrets, versioned backup bucket, ECR mirror push, image load into the node |
-| `40-platform.sh` | In-cluster Service for the AWS endpoint, ESO + `ClusterSecretStore` |
-| `50-gateway.sh` | LiteLLM + Postgres, config from ESO, Bedrock endpoint = floci |
-| `60-memory.sh` | ai-memory tenant `team-a` from the production base |
-| `70-keys.sh` | Service key for ai-memory, developer and EC2-host identities, all stored in Secrets Manager |
-| `80-ec2.sh` | EC2 host: instance profile → secrets → managed settings → hooks → gateway call → shared note |
-| `90-verify.sh` | End-to-end checks and the evidence report |
+| `10-artifacts.sh` | Downloads and checksums upstream release tarballs |
+| `20-kubeconfig.sh` | Turns stack outputs into a kubeconfig (`aws eks update-kubeconfig`) |
+| `30-images.sh` | Drives the local Docker daemon: ECR push, image load into the node |
+| `40-platform.sh` | Helm installs that wait for rollout: floci expires an EKS token after 60 s, and a Tofu provider resolves its token once per apply |
+| `50-gateway.sh`, `60-memory.sh` | `kubectl apply -k` of the kustomize overlays |
+| `70-keys.sh` | Credentials only the running services can issue (LiteLLM keys, ai-memory users) |
+| `85-ec2-wait.sh` | Waits for the guest's user-data to finish |
+| `90-verify.sh` | The evidence run |
 
 ## Emulation caveats
 
@@ -73,5 +85,9 @@ These are properties of the emulator, not of the design:
   `90-verify.sh` retries its network checks for this reason.
 - **k3s ships no ingress controller here** (floci starts it with
   `--disable=traefik`).
+- **Debug pods must not wear the app's Service labels.** The NetworkPolicy
+  selects `app.kubernetes.io/name=ai-memory`, so a probe pod needs that label
+  — which also made it a Service endpoint until the Service selector was
+  narrowed with `app.kubernetes.io/component=server`.
 - First run pulls several GB of images; the LiteLLM image alone took ~20
   minutes on a home connection.
