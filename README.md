@@ -22,6 +22,8 @@ Design, security controls, tenancy and rollout: [docs/architecture.md](docs/arch
 | `deploy/eks/` | Kustomize base + per-tenant overlay (StatefulSet, internal ALB, NetworkPolicy, External Secrets, S3 backups) |
 | `deploy/eks/agent-job-example.yaml` | Headless Claude Code job in EKS using gateway + shared memory |
 | `deploy/ec2/user-data.sh` | EC2 dev/agent host bootstrap |
+| `aws-local/` | The same architecture on emulated AWS (floci): EKS, EC2, ECR, Secrets Manager, S3, Bedrock. Produces an evidence report |
+| `scripts/mcp-call.sh` | Call one ai-memory MCP tool (what users and agents use; CLI page commands are root-only) |
 
 ## Local quickstart
 
@@ -59,13 +61,20 @@ Then in Claude Code, `/status` should show the gateway base URL and the
 | Shared between people? | Write a page as user A, search as user B in the same project |
 | Isolated between repos? | Same search with another `--project` returns nothing |
 | Survives restarts? | `docker compose restart ai-memory`, search again (`verify.sh` step 7) |
-| Consolidation via gateway? | `ai-memory llm-test` in the server, then LiteLLM spend logs for tag `ai-memory` |
+| Consolidation via gateway? | `ai-memory llm-test --provider openai-compat --model "$AI_MEMORY_LLM_MODEL" --prompt ping` in the server, then LiteLLM spend for the ai-memory service key |
 | Capture policy? | `printf '{"cwd":"%s"}' "$PWD" \| ai-memory hook --event user-prompt-submit --agent claude-code --server-url "$AI_MEMORY_SERVER_URL" --check-capture` |
 
 ## Status
 
-- Scripts and manifests are syntax-checked and the kustomize overlay
-  renders; they have **not** been run against a real Bedrock account or
-  EKS cluster. Placeholders are in `UPPER_CASE`.
+- The architecture has been run end to end on **emulated AWS** (`aws-local/`,
+  powered by [floci](https://github.com/floci-io/floci)): a real k3s cluster,
+  real EC2 guests with IMDS, ECR, Secrets Manager, S3 and External Secrets.
+  The latest run passes 32/32 checks — see `aws-local/evidence/`.
+  What the manifests in `deploy/eks/base` apply there is what they apply in EKS.
+- Not yet run against a real AWS account: Bedrock answers are emulated (stubbed
+  or proxied), and the ALB and Pod Identity have local stand-ins.
+  Placeholders are in `UPPER_CASE`.
+- Operational findings from those runs are in
+  [docs/architecture.md](docs/architecture.md) section 10.
 - Bedrock model IDs are deliberately not hard-coded: copy the inference
   profile IDs from `aws bedrock list-inference-profiles`.
