@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: litellm } }
+  template:
+    metadata: { labels: { app: litellm } }
+    spec:
+      containers:
+        - name: litellm
+          image: ghcr.io/berriai/litellm:main-stable
+          imagePullPolicy: IfNotPresent
+          args: ["--config", "/app/config/config.yaml", "--port", "4000"]
+          env:
+            - name: LITELLM_MASTER_KEY
+              valueFrom: { secretKeyRef: { name: litellm, key: master-key } }
+            - name: LITELLM_SALT_KEY
+              valueFrom: { secretKeyRef: { name: litellm, key: salt-key } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: litellm, key: db-password } }
+            - { name: DATABASE_URL, value: "postgresql://litellm:$(DB_PASSWORD)@litellm-db:5432/litellm" }
+            - { name: STORE_MODEL_IN_DB, value: "False" }
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: litellm, key: aws-access-key } }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: litellm, key: aws-secret-key } }
+            - { name: AWS_REGION, value: us-east-1 }
+            # Bedrock Runtime endpoint = floci. Real EKS: leave unset.
+            - { name: BEDROCK_ENDPOINT, value: "http://aws.aws-local.svc.cluster.local:4566" }
+          ports: [{ name: http, containerPort: 4000 }]
+          readinessProbe:
+            httpGet: { path: /health/liveliness, port: http }
+            periodSeconds: 10
+            failureThreshold: 30
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+          volumeMounts: [{ name: config, mountPath: /app/config }]
+      volumes:
+        - name: config
+          configMap: { name: litellm-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+spec:
+  selector: { app: litellm }
+  ports: [{ name: http, port: 4000, targetPort: http }]

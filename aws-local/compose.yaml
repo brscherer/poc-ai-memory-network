@@ -1,0 +1,42 @@
+# Local AWS for the POC, emulated by floci (https://github.com/floci-io/floci).
+#
+# What is real here:
+#   - EKS  -> a k3s cluster in Docker (real Kubernetes API, NetworkPolicy, storage)
+#   - EC2  -> Docker containers with IMDS, instance-profile credentials, user-data
+#   - ECR  -> a real OCI registry behind the ECR API
+#   - IAM / STS / Secrets Manager / S3 / KMS -> AWS-compatible APIs
+# What is not:
+#   - Bedrock Runtime returns a stub reply unless BEDROCK_BACKEND=proxy points it
+#     at an OpenAI-compatible server (e.g. Ollama). Only Converse is proxied.
+#   - No ALB controller or Pod Identity; see aws-local/README.md for stand-ins.
+name: aimem-aws-local
+
+services:
+  floci:
+    image: floci/floci:${FLOCI_TAG:-latest-compat}
+    container_name: aimem-floci
+    ports:
+      - "127.0.0.1:4566:4566"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - floci-data:/app/data
+    environment:
+      FLOCI_HOSTNAME: aimem-floci
+      FLOCI_BASE_URL: http://aimem-floci:4566
+      FLOCI_STORAGE_MODE: persistent
+      # Every container floci starts (EKS k3s node, EC2 guests, ECR registry)
+      # joins this network, so they can reach each other and floci by name.
+      FLOCI_SERVICES_DOCKER_NETWORK: aimem-local
+      FLOCI_SERVICES_BEDROCK_RUNTIME_BACKEND: ${BEDROCK_BACKEND:-stub}
+      FLOCI_SERVICES_BEDROCK_RUNTIME_PROXY_URL: ${BEDROCK_PROXY_URL:-}
+      FLOCI_SERVICES_BEDROCK_RUNTIME_PROXY_DEFAULT_MODEL: ${BEDROCK_PROXY_MODEL:-}
+    networks:
+      aimem-local:
+        aliases: [floci]
+
+volumes:
+  floci-data:
+
+networks:
+  aimem-local:
+    name: aimem-local

@@ -1,0 +1,97 @@
+#!/bin/bash
+# Local variant of deploy/ec2/user-data.sh for a floci EC2 guest
+# (Amazon Linux 2023 container). Same flow: instance role -> Secrets
+# Manager -> managed settings -> ai-memory hooks. The guest then records a
+# note in shared memory and calls the gateway, as evidence.
+set -euo pipefail
+exec > >(tee -a /var/log/ai-host-bootstrap.log) 2>&1
+trap 'echo "[bootstrap] FAILED at line $LINENO"' ERR
+NAME="__HOST_NAME__"
+GATEWAY_URL="http://floci-eks-ai-platform:30400"
+MEMORY_URL="http://floci-eks-ai-platform:30374"
+AI_MEMORY_VERSION="__AI_MEMORY_VERSION__"
+echo "[bootstrap] host=$NAME aws_endpoint=${AWS_ENDPOINT_URL:-unset}"
+
+# floci installs its IMDS proxy (and sshd) with the package manager right
+# after boot; wait for those installs instead of fighting over the lock.
+pm_busy() { for p in /proc/[0-9]*; do tr '\0' ' ' < "$p/cmdline" 2>/dev/null; echo; done | grep -qE '^(/usr/bin/)?(apt-get|apt|dpkg|dnf|/usr/bin/python3 /usr/bin/dnf) '; }
+for _ in $(seq 1 120); do pm_busy || break; sleep 5; done
+
+ARCH=$(uname -m)
+if command -v dnf >/dev/null; then
+  dnf install -y -q awscli-2 jq tar gzip findutils >/dev/null
+else
+  export DEBIAN_FRONTEND=noninteractive
+  retry() { for _ in $(seq 1 60); do "$@" && return 0; sleep 5; done; return 1; }
+  retry apt-get -o DPkg::Lock::Timeout=300 update -qq
+  retry apt-get -o DPkg::Lock::Timeout=300 install -y -qq curl unzip jq ca-certificates >/dev/null
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH}.zip" -o /tmp/awscli.zip
+  unzip -q /tmp/awscli.zip -d /tmp && /tmp/aws/install >/dev/null && rm -rf /tmp/aws /tmp/awscli.zip
+fi
+
+# floci exports AWS_EC2_METADATA_SERVICE_ENDPOINT (honoured by the AWS CLI);
+# on real EC2 it is unset and the link-local address is used.
+IMDS="${AWS_EC2_METADATA_SERVICE_ENDPOINT:-http://169.254.169.254}"
+imds() { local t; t=$(curl -s -m 3 -X PUT "$IMDS/latest/api/token" -H 'X-aws-ec2-metadata-token-ttl-seconds: 60'); curl -sf -m 3 -H "X-aws-ec2-metadata-token: $t" "$IMDS/latest/meta-data/$1"; }
+for _ in $(seq 1 60); do imds iam/security-credentials/ >/dev/null && break; sleep 5; done
+echo "[bootstrap] IMDS role: $(imds iam/security-credentials/)"
+# Use the instance profile, not the static keys floci puts in the environment.
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+echo "[bootstrap] credential source: $(aws configure list | awk -F' *: *' '$1~/access_key/{print $3}')"
+echo "[bootstrap] caller identity: $(aws sts get-caller-identity --query Arn --output text)"
+
+# Private artifact store = S3 bucket, read with the instance role.
+aws configure set default.s3.addressing_style path
+mkdir -p /usr/local/share/ai-memory
+aws s3 cp "s3://__ARTIFACTS_BUCKET__/ai-memory/${AI_MEMORY_VERSION}/ai-memory-linux-${ARCH}.tar.gz" - \
+  | tar -xz -C /usr/local/share/ai-memory
+ln -sf /usr/local/share/ai-memory/ai-memory /usr/local/bin/ai-memory
+ai-memory --version
+
+cat > /usr/local/bin/claude-gateway-key <<SH
+#!/bin/sh
+exec aws secretsmanager get-secret-value --secret-id "ai-gateway/hosts/${NAME}/litellm" --query SecretString --output text
+SH
+chmod 0755 /usr/local/bin/claude-gateway-key
+mkdir -p /etc/claude-code
+cat > /etc/claude-code/managed-settings.json <<JSON
+{
+  "apiKeyHelper": "/usr/local/bin/claude-gateway-key",
+  "env": {
+    "ANTHROPIC_BASE_URL": "${GATEWAY_URL}",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5",
+    "AI_MEMORY_SERVER_URL": "${MEMORY_URL}"
+  }
+}
+JSON
+
+MEM_KEY=$(aws secretsmanager get-secret-value --secret-id "ai-memory/hosts/${NAME}/api-key" --query SecretString --output text)
+ai-memory install-hooks --agent claude-code --apply \
+  --server-url "$MEMORY_URL" --auth-token "$MEM_KEY" \
+  --capture-mode allowlist --project-strategy repo-root >/dev/null
+echo "[bootstrap] hooks installed: $(ls ~/.claude 2>/dev/null | tr '\n' ' ')"
+
+echo "[evidence] gateway call with the host key:"
+curl -fsS "$GATEWAY_URL/v1/messages" -H "Authorization: Bearer $(claude-gateway-key)" \
+  -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' \
+  -d '{"model":"claude-haiku-4-5","max_tokens":32,"messages":[{"role":"user","content":"ping from '"$NAME"'"}]}' \
+  | jq -c '{model, stop_reason, text: .content[0].text}'
+
+# Regular users talk MCP (the CLI page commands are root-only /admin routes).
+mcp() {
+  curl -fsS "$MEMORY_URL/mcp" -H "Authorization: Bearer $MEM_KEY" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    -d "$(jq -nc --arg t "$1" --argjson a "$2" '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:$t,arguments:$a}}')" \
+    | jq -er 'select(.result.isError != true) | .result.content[0].text'
+}
+echo "[evidence] write a note to shared memory as host-${NAME}:"
+BODY="# Note from ${NAME}
+
+Written by the EC2 host bootstrap at $(date -u +%FT%TZ). Token: EC2-EVIDENCE-${NAME}"
+mcp memory_write_page "$(jq -nc --arg p "notes/from-${NAME}.md" --arg b "$BODY" \
+  '{workspace:"poc",project:"shared-demo",path:$p,body:$b,tags:["evidence"]}')" | jq -c '{path}'
+mcp memory_query "{\"workspace\":\"poc\",\"project\":\"shared-demo\",\"query\":\"EC2-EVIDENCE-${NAME}\"}" \
+  | jq -c '{found: [.hits[].path]}'
+echo "[bootstrap] done"

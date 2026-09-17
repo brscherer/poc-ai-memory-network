@@ -1,0 +1,9 @@
+# Stand-in for the gateway's internal ALB, for EC2 guests on the Docker network.
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm-nodeport
+spec:
+  type: NodePort
+  selector: { app: litellm }
+  ports: [{ name: http, port: 4000, targetPort: http, nodePort: 30400 }]

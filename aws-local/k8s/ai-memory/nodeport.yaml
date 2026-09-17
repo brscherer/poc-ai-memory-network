@@ -1,0 +1,14 @@
+# Stand-in for the internal ALB: EC2 guests on the Docker network reach
+# ai-memory at floci-eks-ai-platform:30374. externalTrafficPolicy Local keeps
+# the client IP, so the NetworkPolicy's VPC ipBlock still applies.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-memory-nodeport
+spec:
+  type: NodePort
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: ai-memory
+  ports:
+    - { name: http, port: 49374, targetPort: http, nodePort: 30374 }

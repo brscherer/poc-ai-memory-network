@@ -1,0 +1,22 @@
+# Same aliases as local/litellm-config.tmpl.yaml; the only local difference is
+# the Bedrock Runtime endpoint (floci) and the Converse route.
+x-bedrock: &bedrock
+  aws_region_name: os.environ/AWS_REGION
+  aws_bedrock_runtime_endpoint: os.environ/BEDROCK_ENDPOINT
+
+model_list:
+  - model_name: claude-opus-5
+    litellm_params: { <<: *bedrock, model: bedrock/converse/us.anthropic.claude-opus-5 }
+  - model_name: claude-sonnet-5
+    litellm_params: { <<: *bedrock, model: bedrock/converse/us.anthropic.claude-sonnet-5 }
+  - model_name: claude-haiku-4-5
+    litellm_params: { <<: *bedrock, model: bedrock/converse/us.anthropic.claude-haiku-4-5 }
+  - model_name: memory-consolidation
+    litellm_params: { <<: *bedrock, model: bedrock/converse/us.anthropic.claude-haiku-4-5 }
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL

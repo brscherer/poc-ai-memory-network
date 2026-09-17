@@ -1,0 +1,87 @@
+# ai-memory tenant "team-a" on the local EKS cluster.
+# Reuses the production base unchanged; patches only what floci cannot
+# provide (ALB, EBS, Pod Identity) or what differs locally (endpoints).
+# VPC_CIDR and S3_ENDPOINT_CIDR are filled in by 60-memory.sh.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ai-memory-team-a
+resources:
+  - ../../../deploy/eks/base
+  - namespace.yaml
+  - nodeport.yaml
+labels:
+  - pairs: { ai-platform/tenant: team-a }
+    includeSelectors: false
+images:
+  - name: REGISTRY/ai-memory
+    newName: 000000000000.dkr.ecr.us-east-1.localhost:4566/mirror/ai-memory
+    newTag: 2.2.1
+patches:
+  # No ALB controller locally: reach the service via NodePort / port-forward.
+  - target: { kind: Ingress, name: ai-memory }
+    patch: |
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata: { name: ai-memory }
+  - target: { kind: ExternalSecret, name: ai-memory }
+    patch: |
+      - { op: replace, path: /spec/refreshInterval, value: 1m }
+      - { op: replace, path: /spec/data/0/remoteRef/key, value: ai-memory/team-a/root-token }
+      - { op: replace, path: /spec/data/1/remoteRef/key, value: ai-memory/team-a/token-pepper }
+      - { op: replace, path: /spec/data/2/remoteRef/key, value: ai-memory/team-a/litellm-key }
+      - { op: replace, path: /spec/data/3/remoteRef/key, value: ai-memory/team-a/recovery-token }
+      - op: add
+        path: /spec/data/-
+        value: { secretKey: backup-access-key, remoteRef: { key: ai-memory/team-a/backup-aws, property: access_key } }
+      - op: add
+        path: /spec/data/-
+        value: { secretKey: backup-secret-key, remoteRef: { key: ai-memory/team-a/backup-aws, property: secret_key } }
+  - target: { kind: StatefulSet, name: ai-memory }
+    patch: |
+      # image was imported into the node from the ECR mirror
+      - { op: add, path: /spec/template/spec/containers/0/imagePullPolicy, value: Never }
+      - { op: add, path: /spec/template/spec/containers/1/imagePullPolicy, value: Never }
+      - { op: add, path: /spec/template/spec/containers/2/imagePullPolicy, value: IfNotPresent }
+      - op: replace
+        path: /spec/template/spec/containers/0/env/1/value
+        value: ai-memory,ai-memory.ai-memory-team-a,ai-memory.ai-memory-team-a.svc,ai-memory.ai-memory-team-a.svc.cluster.local,floci-eks-ai-platform,localhost,127.0.0.1
+      - { op: replace, path: /spec/volumeClaimTemplates/0/spec/storageClassName, value: local-path }
+      - { op: replace, path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage, value: 2Gi }
+      # backup shipper: floci S3 endpoint + static keys (Pod Identity stand-in)
+      - op: add
+        path: /spec/template/spec/containers/2/env
+        value:
+          - { name: AWS_ENDPOINT_URL, value: "http://aws.aws-local.svc.cluster.local:4566" }
+          - { name: AWS_REGION, value: us-east-1 }
+          - { name: HOME, value: /tmp }
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom: { secretKeyRef: { name: ai-memory, key: backup-access-key } }
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom: { secretKeyRef: { name: ai-memory, key: backup-secret-key } }
+      - op: add
+        path: /spec/template/spec/containers/2/volumeMounts/-
+        value: { name: tmp, mountPath: /tmp }
+      # shorter cycles so the evidence run sees a snapshot land in S3
+      - op: replace
+        path: /spec/template/spec/containers/1/args/0
+        value: |
+          until ai-memory status >/dev/null 2>&1; do sleep 5; done
+          while true; do
+            ai-memory backup --to /backups/ai-memory-$(date +%Y%m%dT%H%M%S).tar.gz \
+              || echo "backup failed"
+            sleep ${BACKUP_INTERVAL:-300}
+          done
+      - op: replace
+        path: /spec/template/spec/containers/2/args/0
+        value: |
+          aws configure set default.s3.addressing_style path
+          while true; do
+            aws s3 sync /backups "s3://example-ai-memory-backups/team-a/" --sse aws:kms \
+              && find /backups -name '*.tar.gz' -mmin +60 -delete
+            sleep 30
+          done
+  - target: { kind: NetworkPolicy, name: ai-memory }
+    patch: |
+      # floci listens on 4566, not 443
+      - { op: replace, path: /spec/egress/2/ports/0/port, value: 4566 }
