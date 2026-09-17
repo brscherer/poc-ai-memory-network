@@ -15,8 +15,12 @@ TOKEN=$(curl -sX PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metad
 NAME=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/tags/instance/Name)
 
 # 1. Pinned, scanned binaries from a private artifact store.
-curl -fsSL "$ARTIFACTS/ai-memory/2.2.1/ai-memory-linux-x86_64" -o /usr/local/bin/ai-memory
-chmod 0755 /usr/local/bin/ai-memory
+# The release tarball carries the binary AND hooks/, which install-hooks
+# needs on disk; /usr/local/share/ai-memory is on its search path.
+mkdir -p /usr/local/share/ai-memory
+curl -fsSL "$ARTIFACTS/ai-memory/2.2.1/ai-memory-linux-$(uname -m).tar.gz" \
+  | tar -xz -C /usr/local/share/ai-memory
+ln -sf /usr/local/share/ai-memory/ai-memory /usr/local/bin/ai-memory
 # (Claude Code is installed from the internal npm mirror / package here.)
 
 # 2. Gateway key helper + managed settings (users cannot override).
@@ -42,7 +46,7 @@ JSON
 # 3. Wire memory for the host's user.
 MEM_KEY=$(aws secretsmanager get-secret-value --secret-id "ai-memory/hosts/${NAME}/api-key" --query SecretString --output text)
 sudo -u "$RUN_AS" -H ai-memory install-hooks --agent claude-code --apply \
-  --server-url "$MEMORY_URL" --auth-token "$MEM_KEY" --as-user "host-${NAME}" \
+  --server-url "$MEMORY_URL" --auth-token "$MEM_KEY" \
   --capture-mode allowlist --project-strategy repo-root
 sudo -u "$RUN_AS" -H ai-memory install-mcp --client claude-code --session-aware --apply \
   --server-url "$MEMORY_URL" --auth-token "$MEM_KEY"

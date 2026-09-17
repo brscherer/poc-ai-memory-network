@@ -44,7 +44,7 @@ spec:
               set -e
               ai-memory install-hooks --agent claude-code --apply \
                 --server-url "$AI_MEMORY_SERVER_URL" --auth-token "$AI_MEMORY_AUTH_TOKEN" \
-                --as-user svc-agent-team-a --capture-mode allowlist --project-strategy repo-root
+                --capture-mode allowlist --project-strategy repo-root
               ai-memory install-mcp --client claude-code --session-aware --apply \
                 --server-url "$AI_MEMORY_SERVER_URL" --auth-token "$AI_MEMORY_AUTH_TOKEN"
               claude -p "Check project memory for known flaky tests, then triage the latest CI failures and write findings back to memory as notes/ci-triage.md." \

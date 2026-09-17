@@ -27,10 +27,10 @@ ai-memory install-mcp --client claude-code --session-aware \
 # Hooks:
 #   --capture-mode allowlist  only repos with a committed .ai-memory.toml are captured
 #   --project-strategy repo-root  worktrees/subdirs collapse into one project
-#   --as-user                 every observation is attributed to this developer
+# Attribution comes from the aim_ key's owner. (--as-user is only a label, and
+# ai-memory 2.2.1 rejects it whenever the token is persisted to disk.)
 ai-memory install-hooks --agent claude-code \
   --server-url "$AI_MEMORY_SERVER_URL" --auth-token "$AI_MEMORY_AUTH_TOKEN" \
-  --as-user "$AI_MEMORY_USER" \
   --capture-mode allowlist --project-strategy repo-root \
   ${AI_MEMORY_NO_PROMPTS:+--no-capture-prompts} \
   --apply
