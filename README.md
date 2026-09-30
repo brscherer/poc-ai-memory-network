@@ -24,6 +24,7 @@ Design, security controls, tenancy and rollout: [docs/architecture.md](docs/arch
 | `deploy/ec2/user-data.sh` | EC2 dev/agent host bootstrap |
 | `aws-local/` | The same architecture on emulated AWS (floci), with the AWS layer in OpenTofu: EKS, EC2, ECR, Secrets Manager, S3, Bedrock. Produces an evidence report |
 | `scripts/mcp-call.sh` | Call one ai-memory MCP tool (what users and agents use; CLI page commands are root-only) |
+| `demo/` | On top of `aws-local/`: a decision made in one person's session reaches another person on another machine, and a newcomer's onboarding |
 
 ## Local quickstart
 

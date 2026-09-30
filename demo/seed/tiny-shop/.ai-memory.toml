@@ -1,0 +1,8 @@
+# Memory scope marker. Every machine that checks out this repository files
+# its sessions under the same workspace/project, wherever the checkout lives.
+workspace = "poc"
+project = "tiny-shop"
+
+[briefing]
+# Inject pinned pages, _rules/ and recent titles at session start.
+inject_on_session_start = "true"
