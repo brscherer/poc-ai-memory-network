@@ -42,6 +42,10 @@ docker rm -f aimem-laptop-lb >/dev/null 2>&1
 docker compose down -v
 docker rm -f floci-ecr-registry floci-eks-ai-platform >/dev/null 2>&1
 docker ps -aq --filter name=floci-ec2- | xargs -r docker rm -f >/dev/null 2>&1
+# `compose down` could not remove its network while the containers above were
+# still attached, and floci creates one network per VPC that nothing else owns.
+docker network rm aimem-local >/dev/null 2>&1
+docker network ls -q --filter name=floci-vpc- | xargs -r docker network rm >/dev/null 2>&1
 docker volume ls -q --filter label=floci=true | xargs -r docker volume rm -f >/dev/null 2>&1
 docker volume rm -f floci-ecr-registry-data floci-eks-ai-platform >/dev/null 2>&1
 
