@@ -27,16 +27,25 @@ fi
 
 if have_state aws; then
   printf '\n\033[1;34m### destroy tofu/aws\033[0m\n'
+  # After a Docker restart the registry behind floci's ECR stays stopped, and
+  # deleting the repository then waits on it forever.
+  docker start floci-ecr-registry >/dev/null 2>&1 || true
   tofu -chdir=tofu/aws destroy $TF_ARGS || true
 fi
 
 printf '\n\033[1;34m### floci\033[0m\n'
+# demo/ adds a relay container to floci's network; it would keep the network busy.
+docker rm -f aimem-laptop-lb >/dev/null 2>&1
 # Stop floci first: while it runs it restarts the containers below, and
 # restores ECR repositories from the registry volume, so a later apply would
 # find resources its state does not know about.
 docker compose down -v
 docker rm -f floci-ecr-registry floci-eks-ai-platform >/dev/null 2>&1
 docker ps -aq --filter name=floci-ec2- | xargs -r docker rm -f >/dev/null 2>&1
+# `compose down` could not remove its network while the containers above were
+# still attached, and floci creates one network per VPC that nothing else owns.
+docker network rm aimem-local >/dev/null 2>&1
+docker network ls -q --filter name=floci-vpc- | xargs -r docker network rm >/dev/null 2>&1
 docker volume ls -q --filter label=floci=true | xargs -r docker volume rm -f >/dev/null 2>&1
 docker volume rm -f floci-ecr-registry-data floci-eks-ai-platform >/dev/null 2>&1
 

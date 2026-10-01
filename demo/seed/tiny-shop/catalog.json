@@ -1,0 +1,5 @@
+{
+  "mug": { "name": "Coffee mug", "price": "12.90" },
+  "tee": { "name": "T-shirt", "price": "24.99" },
+  "sticker": { "name": "Sticker pack", "price": "3.35" }
+}
